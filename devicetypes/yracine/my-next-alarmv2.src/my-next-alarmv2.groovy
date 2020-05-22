@@ -2,7 +2,7 @@
  *  My Next Alarm
  *  Copyright 2018-2020 Yves Racine
  *  LinkedIn profile: ca.linkedin.com/pub/yves-racine-m-sc-a/0/406/4b/
- *  Version 2.1.4
+ *  Version 2.4
  *  Refer to readme file for installation instructions.
  
  *  Developer retains all right, title, copyright, and interest, including all copyright, patent rights,
@@ -18,6 +18,8 @@
  *  Software Distribution is restricted and shall be done only with Developer's written approval.
  */
 import java.text.SimpleDateFormat
+import groovy.json.*
+import groovy.transform.Field
 
 include 'asynchttp_v1'
 
@@ -35,7 +37,7 @@ preferences {
  		description: "optional" )        
 }
 metadata {
-	definition (name: "My Next AlarmV2", namespace: "yracine",  ocfDeviceType: "x.com.st.d.sensor.smoke", author: "yracine") {
+	definition (name: "My Next AlarmV2", namespace: "yracine",  mnmn: "SmartThings", vid: "SmartThings-smartthings-Z-Wave_Smoke_Alarm", ocfDeviceType: "x.com.st.d.sensor.smoke", author: "yracine") {
 		capability "Smoke Detector"
 		capability "Carbon Monoxide Detector"
 		capability "Sensor"
@@ -44,40 +46,59 @@ metadata {
 		capability "Polling"
 		capability "Refresh"
 		capability "Presence Sensor"
-/*
+		capability "Motion Sensor"  // for better motion detection, change the polling interval to 1 minute in MyNextManagerV2.
+        
 		command "getStructure"        
-		command "setStructure"        
+/*
+		setStructure(String attributes) 
+		parameters: attributes must be a valid groovy map or json structure
+ 		see list of structure attributes at https://thingsthataresmart.wiki/index.php?title=My_Next_Alarm#Information 
+*/        
+		command "setStructure"  
 		command "setStructureHome"
 		command "setStructureAway"
-		command "away"
-		command "home"
-		command "present"
-*/        
 		command "getProtectInfo"        
 //		command "getProtectList"
-		command "setProtectSettings" // signature: setProtectSettings(protectId,String protectSettings). protectSettings must be a json map.       
+
+/*
+		setProtectSettings(thermostatId,String thermostatSettings) 
+		parameters: protectId (By defaut current protect), protectSettings must be a valid groovy map or json structure
+		ex. setProtectSettings("", "{night_light_enable: false}")
+ 		see list of attributes at https://thingsthataresmart.wiki/index.php?title=My_Next_Tstat#Information                                       
+*/
+		command "setProtectSettings" 
+        
 		command "produceSummaryReport"        
 		command "save_data_auth"        
-/*
-		strcuture attributes - not supported 
-       
+//		structure attributes 
 
+		attribute "structure_id","string"
 		attribute "st_away","string"
 		attribute "st_name","string"
 		attribute "st_country_code","string"
 		attribute "st_postal_code","string"
-		attribute "st_peak_period_start_time","string"
-		attribute "st_peak_period_end_time","string"
 		attribute "st_time_zone","string"
-		attribute "st_eta_trip_id","string"
-		attribute "st_estimated_arrival_window_begin","string"
-		attribute "st_estimated_arrival_window_end","string"
-		attribute "st_eta_begin","string"
-		attribute "st_wwn_security_state","string"        
+//		attribute "st_peak_period_start_time","string"
+//		attribute "st_peak_period_end_time","string"
+//		attribute "st_eta_trip_id","string"
+//		attribute "st_estimated_arrival_window_begin","string"
+//		attribute "st_estimated_arrival_window_end","string"
+//		attribute "st_eta_begin","string"
+//		attribute "st_wwn_security_state","string"        
 
-		attribute "structure_id","string"
-		attribute "structureData", "string"        
-*/
+//		New attributes in V2
+		attribute "st_members", "string"
+		attribute "st_user", "string"
+		attribute "st_away_timestamp", "string"
+		attribute "st_manual_away_timestamp", "string"
+		attribute "st_manual_eco_timestamp", "string"
+		attribute "st_away_setter", "string"
+		attribute "st_eta", "string"
+		attribute "st_eta_preconditioning_active", "string"
+		attribute "st_eta_unique_id", "string"
+		attribute "st_set_manual_eco_all", "string"
+		attribute "st_vacation_mode", "string"
+		attribute "st_demand_charge_enabled", "string"
 
 		attribute "protectsList","string" 
 		attribute "protectId","string"
@@ -85,6 +106,7 @@ metadata {
 		attribute "alarmState", "string"
 		attribute "locale", "string"
 		attribute "battery_status","string"        
+		attribute "battery_level","string"        
 		attribute "software_version","string"
 		attribute "where_id","string"
 		attribute "where_name","string"
@@ -100,6 +122,8 @@ metadata {
 		attribute "last_manual_test_time","string"
 		attribute "is_manual_test_active","string"
 		attribute "verboseTrace", "string"
+		attribute "smoke","string"
+		attribute "carbonMonoxide","string"
 		attribute "summaryReport", "string"
 
 //		new attributes V2
@@ -114,7 +138,6 @@ metadata {
 		attribute "heat_status", "string"
 		attribute "night_light_enable", "string"
 		attribute "night_light_continuous", "string"
-		attribute "night_light_enable", "string"
 		attribute "home_alarm_link_capable", "string"
 		attribute "wired_or_battery", "string"
 		attribute "capability_level", "string"
@@ -186,6 +209,11 @@ metadata {
 				backgroundColor: "#ffffff",
 			)
 		}
+		standardTile("motion", "device.motion", width: 2, height: 2) {
+			state("active", label:'motion', icon:"st.motion.motion.active", backgroundColor:"#00a0dc")
+			state("inactive", label:'no motion', icon:"st.motion.motion.inactive", backgroundColor:"#ffffff", defaultState:true)
+		}
+            
 	
 		main "smoke"
 		details(["smoke",
@@ -195,6 +223,7 @@ metadata {
 			"lastManualTest",
 			"lastConnection",
 			"lastAPICheck",
+			"motion",            
 			"swVersion",            
 			"refresh"
 			])
@@ -213,6 +242,9 @@ def getBackgroundColors() {
 void installed() {
 	def HEALTH_TIMEOUT= (60 * 60)
 	sendEvent(name: "checkInterval", value: HEALTH_TIMEOUT, data: [protocol: "cloud", displayed:(settings.trace?:false)])
+	sendEvent(name: "DeviceWatch-DeviceStatus", value: "online")
+	sendEvent(name: "healthStatus", value: "online")
+	sendEvent(name: "DeviceWatch-Enroll", value: JsonOutput.toJson([protocol: "cloud", scheme:"untracked"]), displayed: false)
 	state?.scale=getTemperatureScale() 
 	if (settings.trace) { 
 		log.debug("installed>$device.displayName installed with settings: ${settings.inspect()} and state variables= ${state.inspect()}")
@@ -232,6 +264,9 @@ def ping() {
 def updated() {
 	def HEALTH_TIMEOUT= (60 * 60)
 	sendEvent(name: "checkInterval", value: HEALTH_TIMEOUT, data: [protocol: "cloud", displayed:(settings.trace?:false)])
+	sendEvent(name: "DeviceWatch-DeviceStatus", value: "online")
+	sendEvent(name: "healthStatus", value: "online")
+	sendEvent(name: "DeviceWatch-Enroll", value: JsonOutput.toJson([protocol: "cloud", scheme:"untracked"]), displayed: false)
 	state?.scale=getTemperatureScale() 
 	state?.retriesCounter=0       
 	state?.redirectURLcount=0            
@@ -249,6 +284,141 @@ void uninstalled() {
 
 // handle commands
 
+void present() {
+	setStructureHome()
+	home()    
+}
+void away() {
+	setStructureAway()
+	eco()    
+}
+void home() {
+	def previousMode=getPreviousHvacMode()
+	if (previousMode) {    
+		setThermostatMode(previousMode)
+		def exceptionCheck=device.currentValue("verboseTrace")
+		if ((exceptionCheck) && (!exceptionCheck?.contains("done"))) {
+			traceEvent(settings.logFilter,"home>cannot change tstat mode to $previousMode",
+				true, GLOBAL_LOG_ERROR, true)
+		}
+	}        
+    
+}
+void setStructureAway() {
+
+	def away_timestamp=now() / 1000 // epoch in seconds
+	setStructure([away: true, away_setter:0, away_timestamp: away_timestamp])
+	    
+}
+
+void setStructureHome() {
+
+	setStructure([away: false])
+}
+
+
+// settings can be anything supported by Nest at the ST community wiki for MyNextTstat
+void setStructure(String structureSettings) {
+	def settings=[:]
+	try {
+		settings = new groovy.json.JsonSlurper().parseText(structureSettings)   
+		traceEvent(settings.logFilter,"setThermostatSettings>was able to convert json settings  to a map",settings.trace, GLOBAL_LOG_INFO)
+	} catch (e) {
+		traceEvent(settings.logFilter,"setThermostatSettings>was not able to convert settings {$structureSettings) to a map, not a valid json map",settings.trace, GLOBAL_LOG_ERROR)
+		return
+	}
+//	call the corresponding method with the map  
+	setStructure(settings)    
+    
+}
+
+
+
+void setStructure(attributes = []) {
+	def NEST_SUCCESS=200
+	def TOKEN_EXPIRED=401    
+	def REDIRECT_ERROR=307    
+	def BLOCKED=429
+	def interval=1*60    
+	
+   	def structureId= device.currentValue("structure_id")	    
+	traceEvent(settings.logFilter,"setStructure>called with values ${attributes} for ${structureId}",settings.trace)
+//	log.debug("setStructure>called with values ${attributes} for ${structureId}")
+	if (attributes == null || attributes == "" || attributes == [] ) {
+		traceEvent(settings.logFilter, "setStructure>attribute set is empty, exiting", settings.trace)
+		return        
+	}
+	bodyReq = [object_key:"structure.${structureId}",op:"MERGE",value:attributes]    
+	int statusCode
+	def exceptionCheck  
+	api('setStructure', structureId, bodyReq) {resp ->
+		statusCode = resp?.status
+		state?.lastStatusCodeForStructure=statusCode				                
+		exceptionCheck=device.currentValue("verboseTrace")
+		if (statusCode == NEST_SUCCESS) {
+			/* when success, reset the exception counter */
+			state.exceptionCount=0
+			if ((data?."replayStructureId${state?.retriesStructureCounter}" == null) ||
+				(state?.retriesStructureCounter > get_MAX_SETTER_RETRIES())) {          // reset the counter if last entry is null
+				reset_replay_data('Structure')                
+				state?.retriesStructureCounter=0
+			}            
+			traceEvent(settings.logFilter,"setStructure>done for ${structureId}", settings.trace)
+			runIn(1*60, "refresh_structure_async", [overwrite:true])				                
+		} else {
+			traceEvent(settings.logFilter,"setStructure> error=${statusCode.toString()} for ${structureId}", true, GLOBAL_LOG_ERROR)
+		} /* end if statusCode */
+	} /* end api call */                
+	if (exceptionCheck?.contains("exception")) {
+		sendEvent(name: "verboseTrace", value: "", displayed:(settings.trace?:false)) // reset verboseTrace            
+		traceEvent(settings.logFilter,"setStructure>exception=${exceptionCheck}", true, GLOBAL_LOG_ERROR)
+	}                
+	if ((statusCode == BLOCKED) ||
+		(exceptionCheck?.contains("Nest response error")) || 
+		(exceptionCheck?.contains("ConnectTimeoutException"))) {
+		state?.retriesStructureCounter=(state?.retriesStructureCounter?:0)+1        
+		if (!(interval=get_exception_interval_delay( state?.retriesStructureCounter))) {  
+			traceEvent(settings.logFilter,"setStructure>too many retries", true, GLOBAL_LOG_ERROR)
+			state?.retriesStructureCounter=0            
+			reset_replay_data('Structure')                
+			return    
+		}            
+		state.lastPollTimestamp = (statusCode==BLOCKED) ? (now() + (interval * 1000)):(now() + (1 * 60 * 1000)) 
+		data?."replayStructureAttributes${state?.retriesStructureCounter}"=attributes
+		data?."replayStructureId${state?.retriesStructureCounter}"=structureId        
+		traceEvent(settings.logFilter,"setStructure>about to call setStructureReplay,interval=$interval,retries counter=${state?.retriesStructureCounter}", true, GLOBAL_LOG_INFO)
+		runIn(interval, "setStructureReplay", [overwrite:true])              
+	}    
+}
+
+
+
+void setStructureReplay() {
+	def exceptionCheck=""
+
+	for (int i=1; (i<= get_MAX_SETTER_RETRIES()); i++) {
+		def structureId = data?."replayStructureId$i"
+		if (structureId == null) continue  // already processed        
+		def attributes = data?."replayStructureAttributes$i"
+		def poll_interval=1 
+		state?.lastPollTimestamp= (now() - (poll_interval * 60 * 1000)) // reset the lastPollTimeStamp to pass through
+		traceEvent(settings.logFilter,"setStructureReplay>about to call setStructure,retries counter=$i", true, GLOBAL_LOG_INFO)
+		setStructure(structureId,attributes) 
+		exceptionCheck=device.currentValue("verboseTrace")
+		if (exceptionCheck?.contains("done")) {
+			data?."replayStructureId$i"=null        
+		} /* end if */
+	} /* end for */
+	if (exceptionCheck?.contains("done")) { // if last command executed OK, then reset the counter
+		reset_replay_data('Structure')                
+		state?.retriesStructureCounter=0
+	} 
+    
+}    
+    
+void refresh_structure_async() {
+	getStructure(true) 	// force update of the local cache            
+}
 
 
 
@@ -260,7 +430,7 @@ def parse(String description) {
 // protectId		single protectId 
 private def refresh_protect(protectId="") {
 	def todayDay = new Date().format("dd",location.timeZone)
-//	def structure
+	def structure
 	protectId=determine_protect_id(protectId)    
 	def scale = getTemperatureScale()
 	state?.scale= scale    
@@ -279,14 +449,16 @@ private def refresh_protect(protectId="") {
    
 	def dataEvents = [
 		protectId:  data?.protects[0]?.id,
+		structure_id:  data?.protects[0]?.structure_id,
  		protectName:data?.protects[0]?.name,
 		alarmState:((data?.protects[0]?.alarm_state in ['warning','emergency']) ? 'smoke': 
 			(data?.protects[0]?.co_state in ['warning','emergency'])? 'carbonMonoxide' : 'clear'),
 		NestAlarmState:((data?.protects[0]?.alarm_state in ['warning','emergency']) ? data?.protects[0]?.alarm_state + '_smoke': 
 			(data?.protects[0]?.co_state in ['warning','emergency'])? data?.protects[0]?.co_state + '_co' : 'clear'),
 //		onlineState:(data?.protects[0]?.is_online?.toString()=='true')?'Online' : 'Offline',
-//		"structure_id": data?.protects[0]?.structure_id,
 		"battery_status":data?.protects[0]?.battery_health_state,        
+		"battery_level":data?.protects[0]?.battery_level,        
+		battery: (data?.protects[0]?.wired_or_battery)? getBatteryUsage(): 100,		 // evaluated, not precise       
 //		"is_manual_test_active": data?.protects[0]?.is_manual_test_active,
 		"last_manual_test_time": (data?.protects[0]?.last_manual_test_time)? formatTimeInTimezone((data?.protects[0]?.last_manual_test_time*1000))?.substring(0,16):"",
 		"locale": data?.protects[0]?.device_locale,
@@ -297,10 +469,12 @@ private def refresh_protect(protectId="") {
 		"name_long":data?.protects[0]?.long_name,
 //		"is_online": data?.protects.is_online,
 		"last_api_check": formatTimeInTimezone(now())?.substring(0,16),
-		"last_connect_time": data?.protects[0]?.last_connect_time,
-		"last_connection": (data?.protects[0]?.last_connect_time)? formatTimeInTimezone(data?.protects[0]?.last_connect_time)?.substring(0,16):"",
-		"co_alarm_state": data?.protects[0]?.co_state,
+		"last_connect_time": data?.protects[0]?.last_connection,
+		"last_connection": (data?.protects[0]?.last_connection)? formatTimeInTimezone(data?.protects[0]?.last_connection)?.substring(0,16):"",
+		"smoke": ((data?.protects[0]?.alarm_state in ['warning','emergency']) ? 'detected' : 'clear'),
 		"smoke_alarm_state": data?.protects[0]?.alarm_state,
+		"carbonMonoxide": ((data?.protects[0]?.co_state in ['warning','emergency']) ? 'detected' : 'clear'),
+		"co_alarm_state": data?.protects[0]?.co_state,
 //		"ui_color_state":data?.protects[0]?.ui_color_state,
 		"component_smoke_test_passed": data?.protects[0]?.component_smoke_test_passed,
 		"component_co_test_passed": data?.protects[0]?.component_co_test_passed,
@@ -309,6 +483,7 @@ private def refresh_protect(protectId="") {
 		"component_heat_test_passed": data?.protects[0]?.component_heat_test_passed,
 		"auto_away": data?.protects[0]?.auto_away,
 		"auto_away_decision_time_secs": data?.protects[0]?.auto_away_decision_time_secs,
+		"motion": (data?.protects[0]?.auto_away) ? 'active' : 'inactive',        
 		"heat_status": data?.protects[0]?.heat_status,
 		"night_light_enable": data?.protects[0]?.night_light_enable,
 		"night_light_continuous": data?.protects[0]?.night_light_continuous,
@@ -324,38 +499,42 @@ private def refresh_protect(protectId="") {
 		dataEvents.alarmState='tested'    
 	}    
 	generateEvent(dataEvents)   
-/*    
-	def structureId=determine_structure_id(dataEvents?.structure_id)
-	traceEvent(settings.logFilter, "refresh_protect>about to call getStructure") 
-	structure=getStructure(structureId,false)    
+	traceEvent(settings.logFilter, "refresh_protect>about to call getStructure()")
+	structure=getStructure(false) 
 	if (structure) {
-		traceEvent(settings.logFilter, "refresh_protect>structure name= $stucture?.name, values=$structure") 
-		def list =""   
-		structure?.smoke_co_alarms?.each {
-			list=list + it + ','    
-		}    
+		traceEvent(settings.logFilter, "refresh_protect>structure name= $stucture?.name")
 		dataEvents= [
-			protectsList: list,      
 			"st_away": structure?.away,
 			"st_name":structure?.name,
 			"st_country_code": structure?.country_code,
 			"st_postal_code":structure?.postal_code,
-			"st_peak_period_start_time": (structure?.peak_period_start_time)?formatDateInLocalTime(structure?.peak_period_start_time)?.substring(0,16):"",
-			"st_peak_period_end_time":(structure?.peak_period_end_time) ?formatDateInLocalTime(structure?.peak_period_end_time)?.substring(0,16):"",
+//			"st_peak_period_start_time":(structure?.peak_period_start_time)?formatDateInLocalTime(structure?.peak_period_start_time)?.substring(0,16):"",
+//			"st_peak_period_end_time":(structure?.peak_period_end_time)?formatDateInLocalTime(structure?.peak_period_end_time)?.substring(0,16):"",
 			"st_time_zone":structure?.time_zone,
-			"st_eta_begin":(structure?.eta_begin)?formatDateInLocalTime(structure?.eta_begin)?.substring(0,16):"",
-			"st_wwn_security_state": structure?.wwn_security_state       
+//			"st_eta_begin":(structure?.eta_begin)?formatDateInLocalTime(structure?.eta_begin)?.substring(0,16):"",
+//			"st_wwn_security_state": structure?.wwn_security_state
+//			"st_members": structure?.st_members,
+			"st_user": structure?.user,
+			"st_away_timestamp": structure?.away_timestamp,
+			"st_manual_away_timestamp":structure?.manual_away_timestamp,
+			"st_manual_eco_timestamp":structure?.manual_eco_timestamp,
+			"st_away_setter":structure?.away_setter,
+			"st_eta":structure?.eta,
+			"st_eta_preconditioning_active":structure?.eta_preconditioning_active,
+			"st_eta_unique_id":structure?.eta_unique_id,
+			"st_set_manual_eco_all":structure?.set_manual_eco_all,
+			"st_vacation_mode":structure?.vacation_mode,
+			"st_demand_charge_enabled":structure?.demand_charge_enabled
 		]
-		if (dataEvents?.st_away == 'away') { 
+		if (dataEvents?.st_away.toString() == 'true') { 
 			dataEvents?.presence= "not present"
 		} else {        
 			dataEvents?.presence= "present"
 		}            
         
 		generateEvent(dataEvents)        
-       
+        
 	}    
-*/
 	traceEvent(settings.logFilter,"refresh_protect>done for protectId =${protectId}", settings.trace)
     
 }
@@ -385,13 +564,26 @@ void poll() {
 	def time_check_for_poll = (now() - (poll_interval * 60 * 1000))
 	if ((state?.lastPollTimestamp) && (state?.lastPollTimestamp > time_check_for_poll)) {
 		traceEvent(settings.logFilter,"poll>protectId = ${protectId},time_check_for_poll (${time_check_for_poll} < state.lastPollTimestamp (${state.lastPollTimestamp}), not refreshing data...",
-			settings.trace, get_LOG_INFO())            
+			settings.trace, GLOBAL_LOG_INFO)            
 		return
 	}
 	getProtectInfo(protectId, true)   
 	refresh_protect(protectId)    
 	traceEvent(settings.logFilter,"poll>done for protectId =${protectId}", settings.trace)
 
+}
+private def getBatteryUsage() {  // this is estimated as voltage is not available
+	float nominal_voltage=5400
+	double pct_battery
+
+	def battery_level=device.currentValue("battery_level")
+	def battery_status=device.currentValue("battery_status")
+	if (battery_level) {
+		pct_battery=((battery_level.toFloat()/nominal_voltage) * 100).round(0)
+	} else {
+		pct_battery=(battery_status=='ok')? 80 : (battery_status=='low')? 40 : 15
+	}        
+	return (pct_battery.intValue())    
 }
 
 
@@ -415,7 +607,14 @@ private void generateEvent(Map results) {
 				def isChange = isStateChange(device, name, value.toString())
 				isDisplayed = isChange
 				sendEvent(name: name, value: value.toString(), displayed: isDisplayed)                                     									 
- 			} else if (upperFieldName?.contains("DATA")) { // data variable names contain 'data'
+ 			} else if (((upperFieldName.contains("HUMIDITY")) || (upperFieldName == "BATTERY"))) {
+				value=(value?:0)
+ 				double humValue = value?.toDouble().round(0)
+				String humValueString = String.format('%2d', humValue.intValue())
+				def isChange = isStateChange(device, name, humValueString)
+				isDisplayed = isChange
+				sendEvent(name: name, value: humValueString, unit: "%", displayed: isDisplayed, isStateChange: isChange)
+			} else if (upperFieldName?.contains("DATA")) { // data variable names contain 'data'
 
 				sendEvent(name: name, value: value, displayed: (settings.trace?:false))                                     									 
 
@@ -450,7 +649,7 @@ private void api( method, id, args=null, success = {}) {
        
 		if (!refresh_tokens()) {
 			if ((exceptionCheck) && (state.exceptionCount >= MAX_EXCEPTION_COUNT) && (exceptionCheck?.contains("Unauthorized"))) {
-//				traceEvent(settings.logFilter,"api>$exceptionCheck, not able to renew the refresh token;need to re-login to Nest via MyNestInit....", true, get_LOG_ERROR())         
+//				traceEvent(settings.logFilter,"api>$exceptionCheck, not able to renew the refresh token;need to re-login to Nest via MyNestInit....", true, GLOBAL_LOG_ERROR)         
 			}
 		} else {
         
@@ -462,6 +661,8 @@ private void api( method, id, args=null, success = {}) {
     
 	def methods = [
 		'setProtectSettings':
+			[uri: "${URI_ROOT}/${get_API_VERSION()}/put", type: 'put'],
+		'setStructure':
 			[uri: "${URI_ROOT}/${get_API_VERSION()}/put", type: 'put'],
 		]
 	def request = methods.getAt(method)
@@ -476,7 +677,7 @@ private void api( method, id, args=null, success = {}) {
 	if (state.exceptionCount >= MAX_EXCEPTION_COUNT) {
 		def exceptionCheck=device.currentValue("verboseTrace")
 		traceEvent(settings.logFilter,"api>error: found a high number of exceptions (${state.exceptionCount}), last exceptionCheck=${exceptionCheck}, about to reset counter",
-			settings.trace, get_LOG_ERROR())  
+			settings.trace, GLOBAL_LOG_ERROR)  
 		if (!exceptionCheck?.contains("Unauthorized")) {          
 			state.exceptionCount = 0  // reset the counter as long it's not unauthorized exception
 			sendEvent(name: "verboseTrace", value: "", displayed:(settings.trace?:false)) // reset verboseTrace            
@@ -504,14 +705,14 @@ private void doRequest(uri, args, type, success) {
 		body:[]
 	]
 	try {
-		traceEvent(settings.logFilter,"doRequest>about to ${type} with uri ${params.uri}, args= ${args}",settings.trace, get_LOG_INFO())
+		traceEvent(settings.logFilter,"doRequest>about to ${type} with uri ${params.uri}, args= ${args}",settings.trace, GLOBAL_LOG_INFO)
 		if (type == 'put') {
 			def objects=[objects: [args]]          	
 			def argsInJson=new groovy.json.JsonBuilder(objects)        
-			traceEvent(settings.logFilter,"doRequest>objects= ${objects}",settings.trace, get_LOG_INFO())
-			traceEvent(settings.logFilter,"doRequest>argsInJson= ${argsInJson}",settings.trace, get_LOG_INFO())
+			traceEvent(settings.logFilter,"doRequest>objects= ${objects}",settings.trace, GLOBAL_LOG_INFO)
+			traceEvent(settings.logFilter,"doRequest>argsInJson= ${argsInJson}",settings.trace, GLOBAL_LOG_INFO)
 			params?.body = argsInJson.toString()
-			traceEvent(settings.logFilter,"doRequest>about to ${type} with params= ${params},", settings.trace, get_LOG_INFO())
+			traceEvent(settings.logFilter,"doRequest>about to ${type} with params= ${params},", settings.trace, GLOBAL_LOG_INFO)
 			httpPostJson(params, success)
 
 		} else if (type == 'get') {
@@ -522,21 +723,21 @@ private void doRequest(uri, args, type, success) {
 		traceEvent(settings.logFilter,"doRequest>done with ${type}", settings.trace)
 
 	} catch (java.net.UnknownHostException e) {
-		traceEvent(settings.logFilter,"doRequest> Unknown host ${params.uri}", settings.trace, get_LOG_ERROR())
+		traceEvent(settings.logFilter,"doRequest> Unknown host ${params.uri}", settings.trace, GLOBAL_LOG_ERROR)
 	} catch (java.net.NoRouteToHostException e) {
-		traceEvent(settings.logFilter,"doRequest>No route to host - check the URL ${params.uri} ", settings.trace, get_LOG_ERROR())       
+		traceEvent(settings.logFilter,"doRequest>No route to host - check the URL ${params.uri} ", settings.trace, GLOBAL_LOG_ERROR)       
 	} catch (e) {
-		traceEvent(settings.logFilter,"doRequest>exception $e,error response=${e?.response?.status} for ${params}", settings.trace, get_LOG_ERROR())
+		traceEvent(settings.logFilter,"doRequest>exception $e,error response=${e?.response?.status} for ${params}", settings.trace, GLOBAL_LOG_ERROR)
 		state?.exceptionCount=state?.exceptionCount+1
 		if (e?.response?.status== TOKEN_EXPIRED) {
-			traceEvent(settings.logFilter,"doRequest>token expired ($e?.response?.status), trying to refresh tokens", settings.trace, get_LOG_ERROR())       
+			traceEvent(settings.logFilter,"doRequest>token expired ($e?.response?.status), trying to refresh tokens", settings.trace, GLOBAL_LOG_ERROR)       
 			parent.refreshAllChildAuthTokens()  
 		}    	
 	}
 }
 
 void produceSummaryReport(pastDaysCount) {
-	traceEvent(settings.logFilter,"produceSummaryReport>begin",settings.trace, get_LOG_TRACE())
+	traceEvent(settings.logFilter,"produceSummaryReport>begin",settings.trace, GLOBAL_LOG_TRACE)
 	def countEvents, countTested, countSmokeWarnings,countCoWarnings,countCoEmergencies,countSmokeEmergencies,countBatteryEvents
 	boolean found_values=false
 	Date todayDate = new Date()
@@ -629,31 +830,46 @@ void produceSummaryReport(pastDaysCount) {
 
 	sendEvent(name: "summaryReport", value: summary_report, isStateChange: true)
     
-	traceEvent(settings.logFilter,"produceSummaryReport>end",settings.trace, get_LOG_TRACE())
+	traceEvent(settings.logFilter,"produceSummaryReport>end",settings.trace, GLOBAL_LOG_TRACE)
 
+}
+def getStructure(useCache=true) {
+	def structure=[:]
+	def structure_id=device.currentValue("structure_id")
+	if (structure_id) {    
+		parent.getObject(structure_id,"structure",useCache)
+		parent.updateStructure(this, structure_id)   
+		structure=data?.structure[0]
+	}        
+	return structure    
+    
+}
+
+
+void updateChildStructureData(objects) {
+	traceEvent(settings.logFilter,"updateChildStructureData>objects from parent=$objects",settings.trace,GLOBAL_LOG_TRACE)        
+	if (!data?.structure) {
+		data?.structure=[]    
+	}    
+	data?.structure=objects
+	traceEvent(settings.logFilter,"updateChildStructureData>data?.structure=${data?.structure}",settings.trace,GLOBAL_LOG_TRACE)        
 }
 
 
 
-
 void updateChildData(objects) {
-	traceEvent(settings.logFilter,"updateChildData>objects from parent=$objects",settings.trace,get_LOG_TRACE())        
+	traceEvent(settings.logFilter,"updateChildData>objects from parent=$objects",settings.trace,GLOBAL_LOG_TRACE)        
 	if (!data?.protects) {
 		data?.protects=[]    
 	}    
 	data?.protects=objects
-	traceEvent(settings.logFilter,"updateChildData>data.protects=${data.protects}",settings.trace,get_LOG_TRACE())        
+	traceEvent(settings.logFilter,"updateChildData>data.protects=${data.protects}",settings.trace,GLOBAL_LOG_TRACE)        
 }
 
  //
 //	if no protectId is provided, it is defaulted to the current protectId 
 void getProtectInfo(protectId, useCache=true) {
-	def NEST_SUCCESS=200
-	def TOKEN_EXPIRED=401 
-	def REDIRECT_ERROR=307    
-	def BLOCKED=429
-	def interval=1*60    
-    
+  
 	protectId= determine_protect_id(protectId)	
 	parent.getObject(protectId,"protect",useCache)
 	parent.updateObjects(this, "protect",protectId)  
@@ -664,7 +880,7 @@ void getProtectInfoReplay() {
 	def id = data?.replayId
 	def poll_interval=1 
 	state?.lastPollTimestamp= (now() - (poll_interval * 60 * 1000)) // reset the lastPollTimeStamp to pass through
-	traceEvent(settings.logFilter,"getProtectInfoReplay>about to call getProtectInfo for ${id}",settings.trace, get_LOG_INFO())
+	traceEvent(settings.logFilter,"getProtectInfoReplay>about to call getProtectInfo for ${id}",settings.trace, GLOBAL_LOG_INFO)
 	getProtectInfo(id) 
 }    
  
@@ -676,9 +892,9 @@ void setProtectSettings(protectId,String protectSettings) {
 	def settings=[:]
 	try {
 		settings = new groovy.json.JsonSlurper().parseText(protectSettings)   
-		traceEvent(settings.logFilter,"setProtectSettings>was able to convert settings to a map",settings.trace, get_LOG_INFO())
+		traceEvent(settings.logFilter,"setProtectSettings>was able to convert settings to a map",settings.trace, GLOBAL_LOG_INFO)
 	} catch (e) {
-		traceEvent(settings.logFilter,"setProtectSettings>was not able to convert settings ($protectSettings) to a map, not a valid jso map",settings.trace, get_LOG_ERROR())
+		traceEvent(settings.logFilter,"setProtectSettings>was not able to convert settings ($protectSettings) to a map, not a valid json map",settings.trace, GLOBAL_LOG_ERROR)
 		return
 	}
 //	call the corresponding method with the map  
@@ -702,7 +918,7 @@ void setProtectSettings(protectId,protectSettings = []) {
 		def time_check_for_poll = (now() - (poll_interval * 60 * 1000))
 		if ((state?.lastPollTimestamp) && (state?.lastPollTimestamp > time_check_for_poll)) {
 			traceEvent(settings.logFilter,"setProtectSettings>protectId = ${protectId},time_check_for_poll (${time_check_for_poll} < state.lastPollTimestamp (${state.lastPollTimestamp}), throttling in progress, command not being processed",
-				settings.trace, get_LOG_ERROR())            
+				settings.trace, GLOBAL_LOG_ERROR)            
 			return
 		}
 	}
@@ -719,7 +935,7 @@ void setProtectSettings(protectId,protectSettings = []) {
 		state?.lastStatusCodeForSettings=statusCode				                
 		if (statusCode== REDIRECT_ERROR) {
 			if (!process_redirectURL( resp?.headers.Location)) {
-				traceEvent(settings.logFilter,"setStructure>Nest redirect: too many redirects, count =${state?.redirectURLcount}", true, get_LOG_ERROR())
+				traceEvent(settings.logFilter,"setStructure>Nest redirect: too many redirects, count =${state?.redirectURLcount}", true, GLOBAL_LOG_ERROR)
 				return                
 			}
 			traceEvent(settings.logFilter,"setProtectSettings>Nest redirect: about to call setProtectSettings again, count =${state?.redirectURLcount}", true)
@@ -729,11 +945,11 @@ void setProtectSettings(protectId,protectSettings = []) {
 			return                
 		}		    
 		if (statusCode==BLOCKED) {
-			traceEvent(settings.logFilter,"setProtectSettings>protectId=${protectId},Nest throttling in progress, error=$statusCode", settings.trace, get_LOG_ERROR())
+			traceEvent(settings.logFilter,"setProtectSettings>protectId=${protectId},Nest throttling in progress, error=$statusCode", settings.trace, GLOBAL_LOG_ERROR)
 			interval=1 * 60   // set a minimum of 1min. interval to avoid unecessary load on Nest servers
 		}			
 		if (statusCode==TOKEN_EXPIRED) {
-			traceEvent(settings.logFilter,"setProtectSettings>protectId=${protectId},error $statusCode, need to re-login at Nest", settings.trace, get_LOG_WARN())
+			traceEvent(settings.logFilter,"setProtectSettings>protectId=${protectId},error $statusCode, need to re-login at Nest", settings.trace, GLOBAL_LOG_WARN)
 			return            
 		}
 		exceptionCheck=device.currentValue("verboseTrace")
@@ -748,26 +964,26 @@ void setProtectSettings(protectId,protectSettings = []) {
 			}            
 			traceEvent(settings.logFilter,"setProtectSettings>done for ${protectId}", settings.trace)
 		} else {
-			traceEvent(settings.logFilter,"setProtectSettings> error=${statusCode.toString()} for ${protectId}", true, get_LOG_ERROR())
+			traceEvent(settings.logFilter,"setProtectSettings> error=${statusCode.toString()} for ${protectId}", true, GLOBAL_LOG_ERROR)
 		} /* end if statusCode */
 	} /* end api call */                
 	if (exceptionCheck?.contains("exception")) {
 		sendEvent(name: "verboseTrace", value: "", displayed:(settings.trace?:false)) // reset verboseTrace            
-		traceEvent(settings.logFilter,"setProtectSettings>exception=${exceptionCheck}", true, get_LOG_ERROR())
+		traceEvent(settings.logFilter,"setProtectSettings>exception=${exceptionCheck}", true, GLOBAL_LOG_ERROR)
 	}                
 	if ((statusCode == BLOCKED) ||
 		(exceptionCheck?.contains("ConnectTimeoutException"))) {
 		state?.retriesSettingsCounter=(state?.retriesSettingsCounter?:0)+1            
 		interval=1*60 * state?.retriesSettingsCounter // the interval delay will increase if multiple retries have already been made
 		if (!(interval= get_exception_interval_delay(state?.retriesSettingsCounter))) {   
-			traceEvent(settings.logFilter,"setProtectSettings>too many retries", true, get_LOG_ERROR())
+			traceEvent(settings.logFilter,"setProtectSettings>too many retries", true, GLOBAL_LOG_ERROR)
 			reset_replay_data('Settings')
 			return        
 		}        
 		state.lastPollTimestamp = (statusCode==BLOCKED) ? (now() + (interval * 1000)):(now() + (1 * 60 * 1000)) 
 		data?."replaySettingsId${state?.retriesSettingsCounter}"=protectId
 		data?."replaySettings${state?.retriesSettingsCounter}"=protectSettings    
-		traceEvent(settings.logFilter,"setProtectSettings>about to call setProtectSettingsReplay,retries counter=${state?.retriesSettingsCounter}", true, get_LOG_INFO())
+		traceEvent(settings.logFilter,"setProtectSettings>about to call setProtectSettingsReplay,retries counter=${state?.retriesSettingsCounter}", true, GLOBAL_LOG_INFO)
 		runIn(interval, "setProtectSettingsReplay", [overwrite: true])          
 	}    
     
@@ -796,92 +1012,6 @@ void setProtectSettingsReplay() {
     
 
 
-void getProtectList() {
-	def NEST_SUCCESS=200
-	def TOKEN_EXPIRED=401    
-	def REDIRECT_ERROR=307
-	def BLOCKED=429
-	def alarmsList=""
-	def interval=1*60    
-    
-	def structureId = determine_structure_id("")
-	if (state?.lastStatusCode==BLOCKED) {    
-		def poll_interval=1  // set a minimum of 1 min interval to avoid unecessary load on Nest servers
-		def time_check_for_poll = (now() - (poll_interval * 60 * 1000))
-		if ((state?.lastPollTimestamp) && (state?.lastPollTimestamp > time_check_for_poll)) {
-			traceEvent(settings.logFilter,"getProtectList>structureId = ${structureId},time_check_for_poll (${time_check_for_poll} < state.lastPollTimestamp (${state.lastPollTimestamp}), throttling in progress, command not being processed",
-				settings.trace, get_LOG_ERROR())            
-			return
-		}
-	}
-	traceEvent(settings.logFilter,"getProtectList> about to call api with body = ${bodyReq}",settings.trace)
-	int statusCode
-	def exceptionCheck
-	api('protectList', structureId, "") {resp ->
-		statusCode = resp?.status
-		state?.lastStatusCode=statusCode				                
-		if (statusCode== REDIRECT_ERROR) {
-			if (!process_redirectURL( resp?.headers.Location)) {
-				traceEvent(settings.logFilter,"getProtectList>Nest redirect: too many redirects, count =${state?.redirectURLcount}", true, get_LOG_ERROR())
-				return                
-			}
-			traceEvent(settings.logFilter,"getProtectList>Nest redirect: about to call getProtectList again, count =${state?.redirectURLcount}")
-			getProtectList()  
-			return                
-		}		    
-		if (statusCode==BLOCKED) {
-			traceEvent(settings.logFilter,"setProtectSettings>protectId=${protectId},Nest throttling in progress,error $statusCode", settings.trace, get_LOG_ERROR())
-			interval=1 * 60   // set a minimum of 1min. interval to avoid unecessary load on Nest servers
-		}			
-		if (statusCode==TOKEN_EXPIRED) {
-			traceEvent(settings.logFilter,"getProtectList>error $statusCode, need to re-login at Nest",true, get_LOG_WARN())
-			return            
-		}
-		exceptionCheck=device.currentValue("verboseTrace")
-		if (statusCode == NEST_SUCCESS) {
-			/* when success, reset the exception counter */
-			state.exceptionCount=0
-			state?.redirectURLcount=0  
-			state?.retriesCounter=0           
-			data?.protectsList = resp.data
-			data?.protectCount = (data?.protectsList) ? data?.protectsList.size() :0
-			for (i in 0..data.protectCount - 1) {
-				traceEvent(settings.logFilter,"getProtectList>found protectId=${data?.protectsList[i]}",settings.trace)
-				alarmsList = alarmsList + data?.protectsList[i] + ','
-			} /* end for */                        
-			sendEvent(name:"protectsList", value: alarmsList, displayed: (settings.trace?:false))    
-			traceEvent(settings.logFilter,"getProtectList>done",settings.trace)
-		} else {
-			traceEvent(settings.logFilter,"getProtectList> error= ${statusCode.toString()}",true, get_LOG_ERROR())
-		} /* end if statusCode */
-	}  /* end api call */              
-			            
-	if (exceptionCheck?.contains("exception")) {
-		sendEvent(name: "verboseTrace", value: "", displayed:(settings.trace?:false)) // reset verboseTrace            
-		traceEvent(settings.logFilter,"getProtectList>exception=${exceptionCheck}",true, get_LOG_ERROR())
-	}                
-	if ((statusCode == BLOCKED) ||
-		(exceptionCheck?.contains("ConnectTimeoutException"))) {
-		state?.retriesCounter=(state?.retriesCounter?:0)+1        
-		if (!(interval=get_exception_interval_delay( state?.retriesCounter, "GETTER"))) {    
-			traceEvent(settings.logFilter,"getProtectList>too many retries", true, get_LOG_ERROR())
-			state?.retriesCounter=0            
-			return        
-		}        
-		state.lastPollTimestamp = (now() + (interval * 1000))
-		traceEvent(settings.logFilter,"getProtectList>about to call getProtectListReplay,retries counter=${state.retriesCounter}", true, get_LOG_INFO())
-		runIn(interval, "getProtectListReplay",[overwrite:true])        
-	}    
-}
-
-
-void getProtectListReplay() {
-	def poll_interval=1 
-	state?.lastPollTimestamp= (now() - (poll_interval * 60 * 1000)) // reset the lastPollTimeStamp to pass through
-	traceEvent(settings.logFilter,"getProtectListReplay>about to recall getProtectList,retries counter=${state.retriesCounter}",
-		true, get_LOG_INFO())
-	getProtectList()
-}    
 
 private void reset_replay_data(replayBuffer) { 
 	for (int i=1; (i<= get_MAX_SETTER_RETRIES()); i++) 
@@ -895,7 +1025,7 @@ private int get_exception_interval_delay(counter,method="SETTER") {
 	int interval = 1*60 * (counter as int) // the interval delay will increase if multiple retries have already been made
 
 	if (counter > max_retries) {
-		traceEvent(settings.logFilter,"get_exception_interval_delay>error max retries ($max_retries), counter=${counter}, exiting", settings.trace, get_LOG_WARN())
+		traceEvent(settings.logFilter,"get_exception_interval_delay>error max retries ($max_retries), counter=${counter}, exiting", settings.trace, GLOBAL_LOG_WARN)
 		return 0
 	}        
 	if (counter>=5) {
@@ -936,7 +1066,7 @@ private void save_redirectURL(redirectURL) {
 
 private def isLoggedIn() {
 	if (data?.auth?.access_token == null) {
-		traceEvent(settings.logFilter,"isLoggedIn> no data auth", settings.trace,get_LOG_TRACE())
+		traceEvent(settings.logFilter,"isLoggedIn> no data auth", settings.trace,GLOBAL_LOG_TRACE)
 		return false
 	} 
 	return true
@@ -958,10 +1088,10 @@ private def isTokenExpired() {
 		traceEvent(settings.logFilter,"isTokenExpired>data.auth= $data.auth",settings.trace)
 		if (authExpTimeInMin <0) {
 //			traceEvent(settings.logFilter,"isTokenExpired>auth token buffer time  expired (${buffer_time_expiration} min.), countdown is ${authExpTimeInMin.intValue()} minutes, need to refresh tokens now!",
-//				settings.trace, get_LOG_WARN())        
+//				settings.trace, GLOBAL_LOG_WARN)        
 		}    
 		if (authExpTimeInMin < (0-buffer_time_expiration)) {
-//			traceEvent(settings.logFilter,"isTokenExpired>refreshing tokens is more at risk (${authExpTimeInMin} min.),exception count may increase if tokens not refreshed!", settings.trace, get_LOG_WARN())
+//			traceEvent(settings.logFilter,"isTokenExpired>refreshing tokens is more at risk (${authExpTimeInMin} min.),exception count may increase if tokens not refreshed!", settings.trace, GLOBAL_LOG_WARN)
 		}    
 		if (data.auth.authexptime > time_check_for_exp) {
 //			traceEvent(settings.logFilter,"isTokenExpired> not expired...", settings.trace)
@@ -1131,19 +1261,15 @@ void initialSetup(auth_data,device_protect_id) {
 }
 
 
-private int get_LOG_ERROR() {return 1}
-private int get_LOG_WARN()  {return 2}
-private int get_LOG_INFO()  {return 3}
-private int get_LOG_DEBUG() {return 4}
-private int get_LOG_TRACE() {return 5}
 
-def traceEvent(logFilter,message, displayEvent=false, traceLevel=4, sendMessage=true) {
-	int LOG_ERROR= get_LOG_ERROR()
-	int LOG_WARN=  get_LOG_WARN()
-	int LOG_INFO=  get_LOG_INFO()
-	int LOG_DEBUG= get_LOG_DEBUG()
-	int LOG_TRACE= get_LOG_TRACE()
-	int filterLevel=(logFilter)?logFilter.toInteger():get_LOG_WARN()
+@Field int GLOBAL_LOG_ERROR=1
+@Field int GLOBAL_LOG_WARN= 2
+@Field int GLOBAL_LOG_INFO=3
+@Field int GLOBAL_LOG_DEBUG=4
+@Field int GLOBAL_LOG_TRACE=5
+
+def traceEvent(logFilter,message, displayEvent=false, traceLevel=GLOBAL_LOG_DEBUG, sendMessage=true) {
+	int filterLevel=(logFilter)?logFilter.toInteger():GLOBAL_LOG_WARN
 
 	if ((displayEvent) || (sendMessage)) {
 		def results = [
@@ -1154,19 +1280,19 @@ def traceEvent(logFilter,message, displayEvent=false, traceLevel=4, sendMessage=
 
 		if ((displayEvent) && (filterLevel >= traceLevel)) {
 			switch (traceLevel) {
-				case LOG_ERROR:
+				case GLOBAL_LOG_ERROR:
 					log.error "${message}"
 				break
-				case LOG_WARN:
+				case GLOBAL_LOG_WARN:
 					log.warn "${message}"
 				break
-				case LOG_INFO:
+				case GLOBAL_LOG_INFO:
 					log.info  "${message}"
 				break
-				case LOG_TRACE:
+				case GLOBAL_LOG_TRACE:
 					log.trace "${message}"
 				break
-				case LOG_DEBUG:
+				case GLOBAL_LOG_DEBUG:
 				default:
 					log.debug "${message}"
 				break
